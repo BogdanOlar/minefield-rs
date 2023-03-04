@@ -249,12 +249,16 @@ pub enum SpotState {
     /// This is a hidden mine
     HiddenMine,
 
+    /// This spot is empty, but was flagged as a mine
     FlaggedEmpty{neighboring_mines: u8},
 
+    /// This spot contains a mine which was correctly flagged
     FlaggedMine,
 
+    /// This spot is empty and was correctly revealed
     RevealedEmpty{neighboring_mines: u8},
 
+    /// This spot contains a mine and was incorrectly revealed
     ExplodedMine,
 }
 
