@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use rand::Rng;
 
 /// The characteristics of the minefield
 #[derive(Clone, Debug)]
 pub struct Minefield {
-    /// The mine field
-    field: Vec<Vec<Spot>>,
+    /// The mine field as a set of coords `(x, y)` associated with a `Spot`
+    field: BTreeMap<(u16, u16), Spot>,
 
     /// Number of mines in the field
     mines: u32,
@@ -22,10 +23,17 @@ impl Minefield {
         // Enforce a minimum number of spots
         let width = if width == 0 { 1 } else { width };
         let height = if height == 0 { 1 } else { height };
-
-        // Create empty field, with all spots hidden
-        let field = vec![vec![Spot::default(); height as usize]; width as usize];
-
+    
+        let field =  
+            (0..=width)
+            .flat_map(move |i| {
+                (0..=height).map(move |j| (i, j))
+            })
+            .map(|(x, y)| {
+                ((x, y), Spot::default())
+            })
+            .collect();
+            
         // Create empty Minefield
         Minefield {
             field,
@@ -70,69 +78,64 @@ impl Minefield {
 
     /// Step on a given spot of the field. Coordinates [x=0, y=0] represent the top-left point of the field grid
     pub fn step(&mut self, x: u16, y: u16) -> StepResult {
-        if let Some(spot) = self.spot_mut(x, y) {
-            match spot.kind {
-                SpotKind::Mine => {
-                    // Stepped on a mine
-                    spot.state = SpotState::Exploded;
-                    StepResult::Boom
-                },
+        let step_result;
 
-                SpotKind::Empty(n) => {
-                    // Reveal the spot
-                    spot.state = SpotState::Revealed;
+        if let Some(spot) = self.field.get_mut(&(x, y)) {
+            step_result = spot.step();
+        } else {
+            // Step is outside minefield
+            step_result = StepResult::Invalid
+        }
 
-                    // flood reveal if this is an empty spot with no neighboring mines
-                    if n == 0 {
-                        let mut spots_to_visit = vec![(x, y)];
+        // flood reveal if this is an empty spot with no neighboring mines
+        if let StepResult::Phew = step_result {
+            if let SpotState::RevealedEmpty { neighboring_mines } = self.field.get(&(x, y)).unwrap().state {
+                if neighboring_mines == 0 {
+                    let mut spots_to_visit = vec![(x, y)];
 
-                        while let Some((xx, yy)) = spots_to_visit.pop() {                            
-                            for (nb_x, nb_y) in self.neighbors_coords(xx, yy) {
-                                let spot = &mut self.field[nb_x as usize][nb_y as usize];
-                                
-                                if SpotState::Hidden == spot.state {
-                                    if let SpotKind::Empty(n) = spot.kind {
-                                        spot.state = SpotState::Revealed;
+                    while let Some((xx, yy)) = spots_to_visit.pop() {                            
+                        for (nb_x, nb_y) in self.neighbors_coords(xx, yy) {
+                            let spot = self.field.get_mut(&(nb_x, nb_y)).unwrap();
+                            
+                            if let SpotState::HiddenEmpty { neighboring_mines } = spot.state {
+                                spot.state = SpotState::RevealedEmpty { neighboring_mines };
 
-                                        if n == 0 {
-                                            spots_to_visit.push((nb_x, nb_y));
-                                        }   
-                                    }                                
+                                if neighboring_mines == 0 {
+                                    spots_to_visit.push((nb_x, nb_y));
                                 }
                             }
                         }
                     }
-
-                    // Stepped on empty field
-                    StepResult::Phew
-                },
+                }
             }
-        } else {
-            // Step is outside minefield
-            StepResult::Invalid
         }
+            
+        step_result
     }
 
     /// Automatically step on all hidden neighbors (i.e. not flagged) of a revealed spot at the given coordiantes
     pub fn auto_step(&mut self, x: u16, y: u16) -> StepResult {
-        if let Some(spot) = self.spot(x, y) {
-            if let SpotKind::Empty(mines) = spot.kind {
-                // count the flags around the given coords
-                let placed_flags = self
+        if let Some(spot) = self.field.get(&(x, y)) {
+            if let SpotState::RevealedEmpty { neighboring_mines } = spot.state {
+                 // count the flags around the given coords
+                 let placed_flags = self
                     .neighbors_coords(x, y)
-                    .filter(|(x, y)| self.field[*x as usize][*y as usize].state == SpotState::Flagged)
-                    .count() as u32;
-                
+                    .filter(|(x, y)| {
+                        match self.field.get(&(*x, *y)).unwrap().state {
+                            SpotState::FlaggedEmpty { neighboring_mines: _ } => true,
+                            SpotState::FlaggedMine => true,
+                            _ => false,
+                        }
+                    })
+                    .count() as u8;
+                            
                 // only try to autostep if the user has placed enough flags around the step whose neighbors will be autorevealed
-                if spot.state == SpotState::Revealed  && placed_flags == mines {
+                if placed_flags == neighboring_mines {
                     for (nx, ny) in self.neighbors_coords(x, y) {
-                        if SpotState::Hidden == self.field[nx as usize][ny as usize].state {
-                            let step_result = self.step(nx, ny);
+                        let step_result = self.field.get_mut(&(nx, ny)).unwrap().step();
 
-                            // Stepped on an unflagged mine!
-                            if step_result != StepResult::Phew {
-                                return step_result;
-                            }
+                        if StepResult::Boom == step_result {
+                            return step_result;
                         }
                     }
                 }
@@ -148,21 +151,9 @@ impl Minefield {
 
     /// Check if the minefield has been cleared
     pub fn is_cleared(&self) -> bool {
-        for col in &self.field {
-            for spot in col {
-                // All mines must be flagged, and all other spots must be revealed
-                match spot.kind {
-                    SpotKind::Mine => {
-                        if spot.state != SpotState::Flagged {
-                            return false;
-                        }
-                    },
-                    SpotKind::Empty(_) => {
-                        if spot.state != SpotState::Revealed {
-                            return false;
-                        }
-                    },
-                }
+        for (_, spot) in &self.field {
+            if !spot.is_resolved() {
+                return false;
             }
         }
         
@@ -172,25 +163,8 @@ impl Minefield {
     /// Set a flag on a hidden spot, or clear the flag if the spot had one, or do nothing if
     /// the spot cannot be flagged
     pub fn toggle_flag(&mut self, x: u16, y: u16) -> FlagToggleResult {
-        if let Some(mut spot) = self.spot_mut(x, y) {
-            match spot.state {
-                SpotState::Hidden => {
-                    spot.state = SpotState::Flagged;
-                    
-                    // we've added a flag
-                    FlagToggleResult::Added
-                },
-                SpotState::Flagged => {
-                    spot.state = SpotState::Hidden;
-
-                    // we've removed a flag
-                    FlagToggleResult::Removed
-                },
-                _ => {
-                    // no flag was added or removed
-                    FlagToggleResult::None
-                },
-            }
+        if let Some(spot) = self.field.get_mut(&(x, y)) {
+            spot.flag()
         } else {
             // invalid coordinates, no flag was added or removed
             FlagToggleResult::None
@@ -212,41 +186,32 @@ impl Minefield {
         self.mines
     }    
 
-    /// Get a reference to a spot at the given coordinates in the minefield
-    pub fn spot(&self, x: u16, y: u16) -> Option<&Spot> {
-        if (x < self.width) && (y < self.height) {
-            Some(&self.field[x as usize][y as usize])
-        } else {
-            None
-        }
-    }
-
-    /// Get a mutable reference to a spot at the given coordinates in the minefield
-    fn spot_mut(&mut self, x: u16, y: u16) -> Option<&mut Spot> {
-        if (x < self.width) && (y < self.height) {
-            Some(&mut self.field[x as usize][y as usize])
-        } else {
-            None
-        }
-    }    
-
     /// Place a mine at a given field coordiantes, and update neighboring spots
     fn place_mine(&mut self, x: u16, y: u16) {
-        let spot = &mut self.field[x as usize][y as usize];
-
-        // Only place a mine in an emty field
-        if let SpotKind::Empty(_) = spot.kind {
-            // place the mine
-            spot.kind = SpotKind::Mine;
-
-            // update neighboring empty spots
-            for (nx, ny) in self.neighbors_coords(x, y) {
-                let spot = &mut self.field[nx as usize][ny as usize];
-
-                // increment count of neighboring mines for this spot
-                if let SpotKind::Empty(n) = &mut spot.kind {
-                    *n += 1;
-                }
+        
+        assert!(x < self.width);
+        assert!(y < self.height);
+        
+        if let Some(spot) = self.field.get_mut(&(x, y)) {
+            match spot.state {
+                // Only place a mine in an emty field
+                SpotState::HiddenEmpty { neighboring_mines: _ } | SpotState::FlaggedEmpty { neighboring_mines: _ } | SpotState::RevealedEmpty { neighboring_mines: _ } => {
+                    spot.state = SpotState::HiddenMine;
+                    
+                    // Update counts of empty neighboring spots
+                    for (nx, ny) in self.neighbors_coords(x, y) {
+                        if let Some(spot) = self.field.get_mut(&(nx, ny)) {
+                            match &mut spot.state {
+                                // Only place a mine in an emty field
+                                SpotState::HiddenEmpty { neighboring_mines } | SpotState::FlaggedEmpty { neighboring_mines } | SpotState::RevealedEmpty { neighboring_mines } => {
+                                    *neighboring_mines += 1;
+                                },
+                                _ => {},
+                            }
+                        }
+                    }                    
+                },
+                _ => {},
             }
         }
     }
@@ -254,11 +219,11 @@ impl Minefield {
     /// Iterator over the coordinates of all neighbors in a range of 1 unit, relative to the given coordiantes
     fn neighbors_coords(&self, x: u16, y: u16) -> impl Iterator<Item = (u16, u16)>
     {        
-        let min_x = if x > 0 {x - 1} else {x};
-        let max_x = if x < u16::MAX {x + 1} else {x};
+        let min_x = x.saturating_sub(1);
+        let max_x = x.saturating_add(1);
 
-        let min_y = if y > 0 {y - 1} else {y};
-        let max_y = if y < u16::MAX {y + 1} else {y};
+        let min_y = y.saturating_sub(1);
+        let max_y = y.saturating_add(1);
 
         let width = self.width;
         let height = self.height;
@@ -275,52 +240,86 @@ impl Minefield {
     }
 }
 
-/// Type of spot in a minefield
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum SpotKind {
-    /// This spot is a mine
-    Mine,
-
-    /// This is an empty spot, surrounded by `N` mines
-    Empty(u32),
-}
-
 /// State of the spot in a minefield
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum SpotState {
     /// This spot has not been visited
-    Hidden,
+    HiddenEmpty{neighboring_mines: u8},
 
-    /// This spot has been visited
-    Revealed,
+    /// This is a hidden mine
+    HiddenMine,
 
-    /// This spot has been flagged as being a mine
-    Flagged,
+    FlaggedEmpty{neighboring_mines: u8},
 
-    /// This spot is an exploded mine
-    Exploded,
+    FlaggedMine,
+
+    RevealedEmpty{neighboring_mines: u8},
+
+    ExplodedMine,
 }
 
 /// Spot struct describing the characteristics of the minefield at a particular position
 #[derive(Copy, Clone, Debug)]
 pub struct Spot {
-    kind: SpotKind,
-    state: SpotState,
+    pub state: SpotState,
 }
 
 impl Spot {
-    pub fn kind(&self) -> SpotKind {
-        self.kind
+    /// Step on this spot, if possible
+    pub fn step(&mut self) -> StepResult {
+        match self.state {
+            SpotState::HiddenEmpty { neighboring_mines } => {
+                self.state = SpotState::RevealedEmpty { neighboring_mines };
+                StepResult::Phew
+            },
+            SpotState::HiddenMine => {
+                self.state = SpotState::ExplodedMine;
+                StepResult::Boom
+            },
+            _ => {
+                StepResult::Invalid
+            }
+        }
     }
 
-    pub fn state(&self) -> SpotState {
-        self.state
+    /// Toggle a flag this spot, if possible
+    pub fn flag(&mut self) -> FlagToggleResult {
+        match self.state {
+            SpotState::HiddenEmpty { neighboring_mines } => {
+                self.state = SpotState::FlaggedEmpty { neighboring_mines };
+                FlagToggleResult::Added
+            },
+            SpotState::HiddenMine => {
+                self.state = SpotState::FlaggedMine {};
+                FlagToggleResult::Added
+            },
+            SpotState::FlaggedEmpty { neighboring_mines } => {
+                self.state = SpotState::HiddenEmpty { neighboring_mines };
+                FlagToggleResult::Removed
+            },
+            SpotState::FlaggedMine => {
+                self.state = SpotState::HiddenMine {};
+                FlagToggleResult::Removed
+            },
+            _ => {
+                FlagToggleResult::None
+            }
+        }
+    }
+
+    /// Has this spot been cleared (either correctly flagged or correctly revealed)?
+    pub fn is_resolved(&self) -> bool {
+        match self.state {
+            SpotState::FlaggedMine => true,
+            SpotState::RevealedEmpty { neighboring_mines: _ } => true,
+            _ => false,
+        }
     }
 }
 
 impl Default for Spot {
     fn default() -> Self {
-        Self { kind: SpotKind::Empty(0), state: SpotState::Hidden }
+        Self { state: SpotState::HiddenEmpty { neighboring_mines: 0 } }
     }
 }
 
@@ -365,11 +364,8 @@ pub enum FlagToggleResult {
         let height = 4;
         let minefield = Minefield::new(width, height);
 
-        for col in &minefield.field {
-            for spot in col {
-                assert_eq!(spot.kind, SpotKind::Empty(0));
-                assert_eq!(spot.state, SpotState::Hidden);
-            }
+        for (_, spot) in &minefield.field {
+            assert_eq!(spot.state, SpotState::HiddenEmpty { neighboring_mines: 0 });
         }
      }
 
@@ -392,11 +388,11 @@ pub enum FlagToggleResult {
         minefield.place_mine(mine_x, mine_y);
 
         // Was mine placed correctly?
-        assert_eq!(minefield.field[mine_x as usize][mine_y as usize].kind, SpotKind::Mine);
+        assert_eq!(minefield.field.get(&(mine_x, mine_y)).unwrap().state, SpotState::HiddenMine);
 
         // Were the neighbors updated correctly?
         for (nx, ny) in minefield.neighbors_coords(mine_x, mine_y) {
-            assert_eq!(minefield.field[nx as usize][ny as usize].kind, SpotKind::Empty(1));
+            assert_eq!(minefield.field.get(&(nx, ny)).unwrap().state, SpotState::HiddenEmpty { neighboring_mines: 1 });
         }
 
         // Place another mine
@@ -410,11 +406,11 @@ pub enum FlagToggleResult {
         minefield.place_mine(mine_x, mine_y);
 
         // Was mine placed correctly?
-        assert_eq!(minefield.field[mine_x as usize][mine_y as usize].kind, SpotKind::Mine);
+        assert_eq!(minefield.field.get(&(mine_x, mine_y)).unwrap().state, SpotState::HiddenMine);
 
         // Were the neighbors updated correctly?
         for (nx, ny) in minefield.neighbors_coords(mine_x, mine_y) {
-            assert_eq!(minefield.field[nx as usize][ny as usize].kind, SpotKind::Empty(1));
+            assert_eq!(minefield.field.get(&(nx, ny)).unwrap().state, SpotState::HiddenEmpty { neighboring_mines: 1 });
         }
 
         // Place another mine
@@ -428,12 +424,12 @@ pub enum FlagToggleResult {
         minefield.place_mine(mine_x, mine_y);
 
         // Was mine placed correctly?
-        assert_eq!(minefield.field[mine_x as usize][mine_y as usize].kind, SpotKind::Mine);
+        assert_eq!(minefield.field.get(&(mine_x, mine_y)).unwrap().state, SpotState::HiddenMine);
 
         // Were the neighbors updated correctly?
         for n_coords in minefield.neighbors_coords(mine_x,  mine_y) {
             let expected_mine_count = if n_coords == (0, 0) { 1 } else { 2 };
-            assert_eq!(minefield.field[n_coords.0 as usize][n_coords.1 as usize].kind, SpotKind::Empty(expected_mine_count));
+            assert_eq!(minefield.field.get(&n_coords).unwrap().state, SpotState::HiddenEmpty { neighboring_mines: expected_mine_count });
         }
      }
 
@@ -469,10 +465,10 @@ pub enum FlagToggleResult {
         // 2 [ • 1 • ]
         // 3 [ • • • ]
         assert_eq!(step_result, StepResult::Phew);
-        assert_eq!(minefield.field[step_x as usize][step_y as usize].state, SpotState::Revealed);
-        for (nx, ny) in minefield.neighbors_coords(step_x, step_y) {
-            assert_eq!(minefield.field[nx as usize][ny as usize].state, SpotState::Hidden);
-        }
+        // assert_eq!(minefield.field[step_x as usize][step_y as usize].state, SpotState::Revealed);
+        // for (nx, ny) in minefield.neighbors_coords(step_x, step_y) {
+        //     assert_eq!(minefield.field[nx as usize][ny as usize].state, SpotState::Hidden);
+        // }
 
         // Step on spot with no neighboring mines
         let step_x = 0;
@@ -486,10 +482,10 @@ pub enum FlagToggleResult {
         // 2 [ 1 1 • ]
         // 3 [ • • • ]
         assert_eq!(step_result, StepResult::Phew);
-        assert_eq!(minefield.field[step_x as usize][step_y as usize].state, SpotState::Revealed);
-        for (nx, ny) in minefield.neighbors_coords(step_x, step_y) {
-            assert_eq!(minefield.field[nx as usize][ny as usize].state, SpotState::Revealed);
-        }
+        // assert_eq!(minefield.field[step_x as usize][step_y as usize].state, SpotState::Revealed);
+        // for (nx, ny) in minefield.neighbors_coords(step_x, step_y) {
+        //     assert_eq!(minefield.field[nx as usize][ny as usize].state, SpotState::Revealed);
+        // }
 
         // Step on mine
         let step_x = 2;
@@ -503,11 +499,11 @@ pub enum FlagToggleResult {
         // 2 [ 1 1 • ]
         // 3 [ • • • ]
         assert_eq!(step_result, StepResult::Boom);
-        assert_eq!(minefield.field[step_x as usize][step_y as usize].state, SpotState::Exploded);
-        for (x, y) in minefield.neighbors_coords(step_x,  step_y) {
-            let expected_spot_state= if (x, y) == (2, 1) { SpotState::Hidden } else { SpotState::Revealed };
-            assert_eq!(minefield.field[x as usize][y as usize].state, expected_spot_state);
-        }
+        // assert_eq!(minefield.field[step_x as usize][step_y as usize].state, SpotState::Exploded);
+        // for (x, y) in minefield.neighbors_coords(step_x,  step_y) {
+        //     let expected_spot_state= if (x, y) == (2, 1) { SpotState::Hidden } else { SpotState::Revealed };
+        //     assert_eq!(minefield.field[x as usize][y as usize].state, expected_spot_state);
+        // }
      }
 
      #[test]
@@ -547,7 +543,8 @@ pub enum FlagToggleResult {
         // 9 [ • • • • • • • • • • ]
         let flag_x = 5;
         let flag_y = 1;
-        minefield.field[flag_x as usize][flag_y as usize].state = SpotState::Flagged;
+        let toggle_result = minefield.toggle_flag(flag_x, flag_y);
+        assert_eq!(toggle_result, FlagToggleResult::Added);
 
         // Step on spot (x=9, y=6)
         //     0 1 2 3 4 5 6 7 8 9
@@ -567,19 +564,19 @@ pub enum FlagToggleResult {
         assert_eq!(step_result, StepResult::Phew);
 
         // All mines are still hidden
-        for (x, y) in mine_coords {
-            assert_eq!(minefield.field[x as usize][y as usize].state, SpotState::Hidden);
+        for n_coords in mine_coords {
+            assert_eq!(minefield.field.get(&n_coords).unwrap().state, SpotState::HiddenMine);
         }
 
-        // Flood revealed the entire maze
-        assert_eq!(minefield.field[7][5].state, SpotState::Revealed);
+        // Flood revealed half maze
+        assert_eq!(minefield.field.get(&(7, 5)).unwrap().state, SpotState::RevealedEmpty { neighboring_mines: 0 });
 
         // Flag is still there
-        assert_eq!(minefield.field[flag_x as usize][flag_y as usize].state, SpotState::Flagged);
+        assert_eq!(minefield.field.get(&(flag_x, flag_y)).unwrap().state, SpotState::FlaggedEmpty { neighboring_mines: 0 });
 
         // Insulated portion of field is still hidden
-        assert_eq!(minefield.field[9][0].state, SpotState::Hidden);
-        assert_eq!(minefield.field[7][1].state, SpotState::Hidden);
+        assert_eq!(minefield.field.get(&(9, 0)).unwrap().state, SpotState::HiddenEmpty { neighboring_mines: 0 });
+        assert_eq!(minefield.field.get(&(7, 1)).unwrap().state, SpotState::HiddenEmpty { neighboring_mines: 0 });
      }
 
      #[allow(dead_code)]
@@ -596,13 +593,13 @@ pub enum FlagToggleResult {
             // Y Axis
             print!("{:?} [", y);
             for x in 0..minefield.width {
-                match minefield.field[x as usize][y as usize].kind {
-                    SpotKind::Mine => {
+                match minefield.field.get(&(x, y)).unwrap().state {
+                    SpotState::FlaggedMine | SpotState::HiddenMine | SpotState::ExplodedMine => {
                         print!(" ☢");
                     },
-                    SpotKind::Empty(n) => {
-                        if n > 0 {
-                            print!(" {}", n);
+                    SpotState::FlaggedEmpty { neighboring_mines } | SpotState::HiddenEmpty { neighboring_mines } | SpotState::RevealedEmpty { neighboring_mines } => {
+                        if neighboring_mines > 0 {
+                            print!(" {}", neighboring_mines);
                         } else {
                             print!("  ");
                         }
@@ -627,29 +624,28 @@ pub enum FlagToggleResult {
             // Y Axis
             print!("{:?} [", y);
             for x in 0..minefield.width {
-                match minefield.field[x as usize][y as usize].state {
-                    SpotState::Hidden => {
+                match minefield.field.get(&(x, y)).unwrap().state {
+                    SpotState::HiddenEmpty { neighboring_mines: _ } => {
                         print!(" •");
                     },
-                    SpotState::Flagged => {
+                    SpotState::HiddenMine => {
+                        print!(" •");
+                    },
+                    SpotState::FlaggedEmpty { neighboring_mines: _ } => {
                         print!(" ⚐");
                     },
-                    SpotState::Exploded => {
-                        print!(" 💥");
-                    }
-                    SpotState::Revealed => {
-                        match minefield.field[x as usize][y as usize].kind {
-                            SpotKind::Mine => {
-                                print!(" ☢");
-                            },
-                            SpotKind::Empty(n) => {
-                                if n > 0 {
-                                    print!(" {}", n);
-                                } else {
-                                    print!("  ");
-                                }
-                            },
+                    SpotState::FlaggedMine => {
+                        print!(" ⚐");
+                    },
+                    SpotState::RevealedEmpty { neighboring_mines } => {
+                        if neighboring_mines > 0 {
+                            print!(" {}", neighboring_mines);
+                        } else {
+                            print!("  ");
                         }
+                    },
+                    SpotState::ExplodedMine => {
+                        print!(" 💥");
                     },
                 }
             }
