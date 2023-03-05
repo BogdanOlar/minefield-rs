@@ -78,10 +78,8 @@ impl Minefield {
 
     /// Step on a given spot of the field. Coordinates [x=0, y=0] represent the top-left point of the field grid
     pub fn step(&mut self, x: u16, y: u16) -> StepResult {
-        let step_result;
-
         if let Some(spot) = self.field.get_mut(&(x, y)) {
-            step_result = spot.step();
+            let step_result = spot.step();
 
             // flood reveal if this is an empty spot with no neighboring mines
             if let SpotState::RevealedEmpty { neighboring_mines: 0 } = spot.state {
@@ -101,12 +99,12 @@ impl Minefield {
                     }
                 }
             }
+
+            step_result
         } else {
             // Step is outside minefield
-            step_result = StepResult::Invalid
+            StepResult::Invalid
         }
-            
-        step_result
     }
 
     /// Automatically step on all hidden neighbors (i.e. not flagged) of a revealed spot at the given coordiantes
