@@ -90,7 +90,9 @@ impl Minefield {
                         let spot = self.field.get_mut(&n_coords).unwrap();
                         
                         if let SpotState::HiddenEmpty { neighboring_mines } = spot.state {
-                            spot.state = SpotState::RevealedEmpty { neighboring_mines };
+                            // Reveal the hidden empty spot by stepping on it
+                            let _step_result = spot.step();
+                            assert_eq!(_step_result, StepResult::Phew);
 
                             if neighboring_mines == 0 {
                                 spots_to_visit.push(n_coords);
