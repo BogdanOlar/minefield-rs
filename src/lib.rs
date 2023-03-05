@@ -249,8 +249,7 @@ impl Minefield {
                 (min_y..=max_y).map(move |j| (i, j))
             })
             .filter(move |(neighbor_x, neighbor_y)| {
-                *neighbor_x < width && 
-                *neighbor_y < height && 
+                *neighbor_x < width && *neighbor_y < height && 
                 !(*neighbor_x == x && *neighbor_y == y)
             })       
     }
