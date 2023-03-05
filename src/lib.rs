@@ -25,9 +25,9 @@ impl Minefield {
         let height = if height == 0 { 1 } else { height };
     
         let field: BTreeMap<(u16, u16), Spot> =  
-            (0..=width)
+            (0..width)
             .flat_map(move |i| {
-                (0..=height).map(move |j| (i, j))
+                (0..height).map(move |j| (i, j))
             })
             .map(|(x, y)| {
                 ((x, y), Spot::default())
@@ -372,8 +372,10 @@ pub enum FlagToggleResult {
         let height = 4;
         let minefield = Minefield::new(width, height);
 
-        for (_, spot) in &minefield.field {
+        for ((x, y), spot) in &minefield.field {
             assert_eq!(spot.state, SpotState::HiddenEmpty { neighboring_mines: 0 });
+            assert!(*x < width);
+            assert!(*y < height);
         }
      }
 
