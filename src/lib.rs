@@ -186,6 +186,16 @@ impl Minefield {
         self.mines
     }    
 
+    /// Get a reference to a particular `Spot` in the field
+    pub fn spot(&self, x: u16, y: u16) -> Option<&Spot> {
+        self.field.get(&(x, y))
+    }
+
+    /// Iterator for all `Spot`s in the field, together with their coordinates
+    pub fn spots(&self) -> impl Iterator<Item = (&(u16, u16), &Spot)> {
+        self.field.iter()
+    }
+
     /// Place a mine at a given field coordiantes, and update neighboring spots
     fn place_mine(&mut self, x: u16, y: u16) {
         
