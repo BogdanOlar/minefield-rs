@@ -24,7 +24,7 @@ impl Minefield {
         let width = if width == 0 { 1 } else { width };
         let height = if height == 0 { 1 } else { height };
     
-        let field =  
+        let field: BTreeMap<(u16, u16), Spot> =  
             (0..=width)
             .flat_map(move |i| {
                 (0..=height).map(move |j| (i, j))
@@ -82,32 +82,28 @@ impl Minefield {
 
         if let Some(spot) = self.field.get_mut(&(x, y)) {
             step_result = spot.step();
-        } else {
-            // Step is outside minefield
-            step_result = StepResult::Invalid
-        }
 
-        // flood reveal if this is an empty spot with no neighboring mines
-        if let StepResult::Phew = step_result {
-            if let SpotState::RevealedEmpty { neighboring_mines } = self.field.get(&(x, y)).unwrap().state {
-                if neighboring_mines == 0 {
-                    let mut spots_to_visit = vec![(x, y)];
+            // flood reveal if this is an empty spot with no neighboring mines
+            if let SpotState::RevealedEmpty { neighboring_mines: 0 } = spot.state {
+                let mut spots_to_visit = vec![(x, y)];
 
-                    while let Some((xx, yy)) = spots_to_visit.pop() {                            
-                        for (nb_x, nb_y) in self.neighbors_coords(xx, yy) {
-                            let spot = self.field.get_mut(&(nb_x, nb_y)).unwrap();
-                            
-                            if let SpotState::HiddenEmpty { neighboring_mines } = spot.state {
-                                spot.state = SpotState::RevealedEmpty { neighboring_mines };
+                while let Some((xx, yy)) = spots_to_visit.pop() {                            
+                    for n_coords in self.neighbors_coords(xx, yy) {
+                        let spot = self.field.get_mut(&n_coords).unwrap();
+                        
+                        if let SpotState::HiddenEmpty { neighboring_mines } = spot.state {
+                            spot.state = SpotState::RevealedEmpty { neighboring_mines };
 
-                                if neighboring_mines == 0 {
-                                    spots_to_visit.push((nb_x, nb_y));
-                                }
+                            if neighboring_mines == 0 {
+                                spots_to_visit.push(n_coords);
                             }
                         }
                     }
                 }
             }
+        } else {
+            // Step is outside minefield
+            step_result = StepResult::Invalid
         }
             
         step_result
@@ -173,12 +169,12 @@ impl Minefield {
 
     /// The width of the minefield
     pub fn width(&self) -> u16 {
-        self.width as u16
+        self.width
     }
 
     /// The height of the minefield
     pub fn height(&self) -> u16 {
-        self.height as u16
+        self.height
     }
 
     /// The number of mines in the minefield
@@ -191,7 +187,7 @@ impl Minefield {
         self.field.get(&(x, y))
     }
 
-    /// Iterator for all `Spot`s in the field, together with their coordinates
+    /// Iterator for all `Spot`s in the field, together with their coordinates `(x, y)`
     pub fn spots(&self) -> impl Iterator<Item = (&(u16, u16), &Spot)> {
         self.field.iter()
     }
@@ -280,7 +276,7 @@ pub struct Spot {
 
 impl Spot {
     /// Step on this spot, if possible
-    pub fn step(&mut self) -> StepResult {
+    fn step(&mut self) -> StepResult {
         match self.state {
             SpotState::HiddenEmpty { neighboring_mines } => {
                 self.state = SpotState::RevealedEmpty { neighboring_mines };
@@ -297,7 +293,7 @@ impl Spot {
     }
 
     /// Toggle a flag this spot, if possible
-    pub fn flag(&mut self) -> FlagToggleResult {
+    fn flag(&mut self) -> FlagToggleResult {
         match self.state {
             SpotState::HiddenEmpty { neighboring_mines } => {
                 self.state = SpotState::FlaggedEmpty { neighboring_mines };
@@ -322,7 +318,7 @@ impl Spot {
     }
 
     /// Has this spot been cleared (either correctly flagged or correctly revealed)?
-    pub fn is_resolved(&self) -> bool {
+    fn is_resolved(&self) -> bool {
         match self.state {
             SpotState::FlaggedMine => true,
             SpotState::RevealedEmpty { neighboring_mines: _ } => true,
