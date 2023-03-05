@@ -128,10 +128,8 @@ impl Minefield {
                 // only try to autostep if the user has placed enough flags around the spot whose neighbors will be autorevealed
                 if placed_flags == neighboring_mines {
                     for (nx, ny) in self.neighbors_coords(x, y) {
-                        let step_result = self.field.get_mut(&(nx, ny)).unwrap().step();
-
-                        if StepResult::Boom == step_result {
-                            return step_result;
+                        if StepResult::Boom == self.step(nx, ny) {
+                            return StepResult::Boom;
                         }
                     }
                 }
