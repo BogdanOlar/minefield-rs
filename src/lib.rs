@@ -81,7 +81,7 @@ impl Minefield {
         if let Some(spot) = self.field.get_mut(&(x, y)) {
             let step_result = spot.step();
 
-            // flood reveal if this is an empty spot with no neighboring mines
+            // flood reveal, if this is an empty spot with no neighboring mines
             if let SpotState::RevealedEmpty { neighboring_mines: 0 } = spot.state {
                 let mut spots_to_visit = vec![(x, y)];
 
@@ -95,6 +95,7 @@ impl Minefield {
                             assert_eq!(_step_result, StepResult::Phew);
 
                             if neighboring_mines == 0 {
+                                // contine flood revealing neighbors from this spot
                                 spots_to_visit.push(n_coords);
                             }
                         }
@@ -137,7 +138,7 @@ impl Minefield {
 
                     StepResult::Phew
                 } else {
-                    // Not enough flags placed by user
+                    // Not enough flags placed by user in order to autostep
                     StepResult::Invalid
                 }
             } else {
