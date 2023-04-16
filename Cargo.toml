@@ -4,6 +4,9 @@ version = "0.1.4"
 edition = "2021"
 authors = ["Bogdan Olar"]
 repository = "https://github.com/BogdanOlar/minefield-rs"
+license-file = "LICENSE"
+description = "A library to model a game of clearing mines."
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
