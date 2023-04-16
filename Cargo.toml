@@ -1,9 +1,10 @@
 [package]
 name = "minefield-rs"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Bogdan Olar"]
 repository = "https://github.com/BogdanOlar/minefield-rs"
+license = "MIT"
 license-file = "LICENSE"
 description = "A library to model a game of clearing mines."
 
