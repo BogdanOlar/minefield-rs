@@ -1,6 +1,6 @@
 [package]
 name = "minefield-rs"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Bogdan Olar"]
 repository = "https://github.com/BogdanOlar/minefield-rs"

@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use rand::Rng;
 
 /// The characteristics of the minefield
 #[derive(Clone, Debug)]
 pub struct Minefield {
     /// The mine field as a set of coords `(x, y)` associated with a `Spot`
-    field: BTreeMap<(u16, u16), Spot>,
+    field: HashMap<(u16, u16), Spot>,
 
     /// Number of mines in the field
     mines: u32,
@@ -24,7 +24,7 @@ impl Minefield {
         let width = if width == 0 { 1 } else { width };
         let height = if height == 0 { 1 } else { height };
     
-        let field: BTreeMap<(u16, u16), Spot> =  
+        let field: HashMap<(u16, u16), Spot> =  
             (0..width)
             .flat_map(move |i| {
                 (0..height).map(move |j| (i, j))
@@ -118,11 +118,10 @@ impl Minefield {
                  let placed_flags = self
                     .neighbors_coords(x, y)
                     .filter(|(x, y)| {
-                        match self.field.get(&(*x, *y)).unwrap().state {
-                            SpotState::FlaggedEmpty { neighboring_mines: _ } => true,
-                            SpotState::FlaggedMine => true,
-                            _ => false,
-                        }
+                        matches!(
+                            self.field.get(&(*x, *y)).unwrap().state, 
+                            SpotState::FlaggedEmpty { neighboring_mines: _ } | SpotState::FlaggedMine
+                        )
                     })
                     .count() as u8;
                             
@@ -249,7 +248,9 @@ impl Minefield {
                 (min_y..=max_y).map(move |j| (i, j))
             })
             .filter(move |(neighbor_x, neighbor_y)| {
+                // the neighbor coords are within the minefield grid
                 *neighbor_x < width && *neighbor_y < height && 
+                // the neighbor coords are not same as `self`
                 !(*neighbor_x == x && *neighbor_y == y)
             })       
     }
@@ -328,11 +329,10 @@ impl Spot {
 
     /// Has this spot been cleared (either correctly flagged or correctly revealed)?
     fn is_resolved(&self) -> bool {
-        match self.state {
-            SpotState::FlaggedMine => true,
-            SpotState::RevealedEmpty { neighboring_mines: _ } => true,
-            _ => false,
-        }
+        matches!(
+            self.state, 
+            SpotState::FlaggedMine | SpotState::RevealedEmpty { neighboring_mines: _ }
+        )
     }
 }
 
